@@ -927,7 +927,7 @@ if __name__ == '__main__':
                 tag = f"{int(case_idx):03d}"
 
                 case = case_geom + '_' + wctrl
-                folder_name = 'results_' + physics_type + '_' + case + '_' + tag + "MS_Check_115"
+                folder_name = 'results_' + physics_type + '_' + case + '_' + tag + "LINEAR_4dP"
                 out_dir = os.path.join("results", folder_name)
 
                 time_data, time_data_report, wells, well_is_inj = run(

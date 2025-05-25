@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <VTKFile type="Collection" version="0.1" byte_order="LittleEndian">
 <Collection>
-<DataSet timestep="0.0" group="" part="0" file="results\results_ccs_grid_CCS_maarten_wrate_000MS_Check_115\solution_ts0.vtu" name=""/>
-<DataSet timestep="50.0" group="" part="0" file="results\results_ccs_grid_CCS_maarten_wrate_000MS_Check_115\solution_ts2.vtu" name=""/>
-<DataSet timestep="200.0" group="" part="0" file="results\results_ccs_grid_CCS_maarten_wrate_000MS_Check_115\solution_ts5.vtu" name=""/>
+<DataSet timestep="0.0" group="" part="0" file="results\results_ccs_grid_CCS_maarten_wbhp_000LINEAR_4dP\solution_ts0.vtu" name=""/>
+<DataSet timestep="50.0" group="" part="0" file="results\results_ccs_grid_CCS_maarten_wbhp_000LINEAR_4dP\solution_ts2.vtu" name=""/>
+<DataSet timestep="700.0" group="" part="0" file="results\results_ccs_grid_CCS_maarten_wbhp_000LINEAR_4dP\solution_ts15.vtu" name=""/>
 </Collection>
 </VTKFile>

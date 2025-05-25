@@ -144,6 +144,7 @@ class Model_CPG(CICDModel):
 
         self.initial_pressure = None
         self.max_pressure_threshold = None
+        self.max_fracture_threshold = None
 
     def set_wells(self):
         # read perforation data from a file
@@ -203,7 +204,20 @@ class Model_CPG(CICDModel):
         # --- Initialize pressure threshold on first step ---
         if self.initial_pressure is None:
             self.initial_pressure = pressure_active.copy()
-            self.max_pressure_threshold = self.initial_pressure * 1.1
+            self.max_pressure_threshold = self.initial_pressure + 0.5  # 0.5 bar threshold
+
+
+        # if self.max_fracture_threshold is None:
+        #     depth = np.array(self.reservoir.mesh.depth, copy=False)
+        #     depth_active = depth[:active_mask.sum()]  # ✅ same shape as pressure_active
+        #     self.max_fracture_threshold = depth_active * 1.25 + 1
+
+        if self.max_fracture_threshold is None:
+            depth = np.array(self.reservoir.mesh.depth, copy=False)
+            depth_active = depth[:active_mask.sum()]  # ✅ same shape as pressure_active
+            self.max_fracture_threshold = depth_active * 139 / 1000 + 1
+
+        fracture_exceed_mask = pressure_active > self.max_fracture_threshold
 
         # --- Exceedance ---
         exceed_mask = pressure_active > self.max_pressure_threshold
@@ -213,12 +227,12 @@ class Model_CPG(CICDModel):
         # Debug: print exceeding cell indices (I, J, K)
         gidx_exceed = active_l2g[exceed_mask]
         if exceed_count > 0:
-            print(f"[Exceedance] {exceed_count} cells exceed threshold")
+            #print(f"[Exceedance] {exceed_count} cells exceed threshold")
             for g in gidx_exceed:
                 k = g // (nx * ny)
                 j = (g % (nx * ny)) // nx
                 i = g % nx
-                print(f"  - I={i + 1}, J={j + 1}, K={k + 1}")  # 1-based indexing
+                #print(f"  - I={i + 1}, J={j + 1}, K={k + 1}")  # 1-based indexing
 
         # --- Pressure plume area (km²) and unique (I,J) count ---
         ij_exceed = {(g % nx, (g // nx) % ny) for g in gidx_exceed}
@@ -227,7 +241,43 @@ class Model_CPG(CICDModel):
         area_km2 = unique_ij_count * dx * dx / 1e6
         self.my_tracked_pressures.setdefault("PRESSURE_PLUME_AREA_KM2", []).append(area_km2)
         self.my_tracked_pressures.setdefault("PRESSURE_EXCEED_SURFACE_CELLS", []).append(unique_ij_count)
-        print(f"[Exceedance] Unique (I, J) surface cells exceeding threshold: {unique_ij_count}")
+        #print(f"[Exceedance] Unique (I, J) surface cells exceeding threshold: {unique_ij_count}")
+
+        # --- Additional: Fracture pressure exceedance analysis ---
+
+        # Apply fracture threshold only to active cells
+        fracture_exceed_count = int(np.sum(fracture_exceed_mask))
+
+        self.my_tracked_pressures.setdefault("FRACTURE_EXCEED_COUNT", []).append(fracture_exceed_count)
+
+        # Surface coverage (I, J) for fracture exceedance
+        gidx_fracture_exceed = active_l2g[fracture_exceed_mask]
+        ij_fracture_exceed = {(g % nx, (g // nx) % ny) for g in gidx_fracture_exceed}
+        fracture_ij_count = len(ij_fracture_exceed)
+        fracture_area_km2 = fracture_ij_count * dx * dx / 1e6
+
+        self.my_tracked_pressures.setdefault("FRACTURE_EXCEED_SURFACE_CELLS", []).append(fracture_ij_count)
+        self.my_tracked_pressures.setdefault("FRACTURE_PLUME_AREA_KM2", []).append(fracture_area_km2)
+
+        # if fracture_exceed_count > 0:
+        #     print(f"[Fracture] {fracture_exceed_count} cells exceed fracture threshold")
+        #     print(f"[Fracture] Unique (I, J) surface cells: {fracture_ij_count}")
+
+        # --- Additional: dP stats for cells exceeding +0.5 bar threshold ---
+        if self.initial_pressure is not None:
+            dp_exceed = pressure_active[exceed_mask] - self.initial_pressure[exceed_mask]
+            if dp_exceed.size > 0:
+                avg_dp_exceed = float(np.mean(dp_exceed))
+                var_dp_exceed = float(np.var(dp_exceed))
+            else:
+                avg_dp_exceed = 0.0
+                var_dp_exceed = 0.0
+        else:
+            avg_dp_exceed = 0.0
+            var_dp_exceed = 0.0
+
+        self.my_tracked_pressures.setdefault("DP_EXCEED_MEAN", []).append(avg_dp_exceed)
+        self.my_tracked_pressures.setdefault("DP_EXCEED_VAR", []).append(var_dp_exceed)
 
         # --- Fault ΔP analysis ---
         from collections import defaultdict
@@ -243,8 +293,17 @@ class Model_CPG(CICDModel):
             fault_deltas[fault_name].append(delta)
 
         all_deltas = [dp for deltas in fault_deltas.values() for dp in deltas]
-        self.my_tracked_pressures.setdefault("DP_FAULT_MEAN", []).append(np.mean(all_deltas) if all_deltas else 0.0)
-        self.my_tracked_pressures.setdefault("DP_FAULT_MAX", []).append(np.max(all_deltas) if all_deltas else 0.0)
+
+        if all_deltas:
+            max_physical_dp = 10.0  # bar, adjust to model reality
+            p1, p99 = np.percentile(all_deltas, [1, 99])
+            filtered_deltas = [dp for dp in all_deltas if p1 <= dp <= p99 and dp <= max_physical_dp]
+            var_dp = np.var(filtered_deltas) if filtered_deltas else 0.0
+        else:
+            var_dp = 0.0
+
+        self.my_tracked_pressures.setdefault("DP_FAULT_VAR", []).append(var_dp)
+        self.my_tracked_pressures.setdefault("DP_FAULT_MAX", []).append(np.max(filtered_deltas) if filtered_deltas else 0.0)
 
         for fault_name, deltas in fault_deltas.items():
             self.my_tracked_pressures.setdefault(f"DP_FAULT_{fault_name}", []).append(
@@ -266,6 +325,91 @@ class Model_CPG(CICDModel):
                 print(f"[Tracker Error] {key_p}/{key_t}: {e}")
 
         self.print_well_rate()
+
+    #
+    # def do_after_step(self):
+    #     self.physics.engine.report()
+    #
+    #     # Dimensions
+    #     nx, ny, nz = map(int, self.reservoir.dims)
+    #
+    #     # --- Extract active cell pressure values ---
+    #     l2g = np.array(self.reservoir.discr_mesh.local_to_global, copy=False)
+    #     active_mask = l2g >= 0
+    #     active_l2g = l2g[active_mask]
+    #
+    #     pressure = np.array(self.physics.engine.X[::self.physics.n_vars], copy=False)
+    #     pressure_active = pressure[:active_mask.sum()]
+    #
+    #     average_pressure = np.mean(pressure_active)
+    #     self.my_tracked_pressures.setdefault("P_MEAN_Reservoir", []).append(average_pressure)
+    #
+    #     # --- Initialize pressure threshold on first step ---
+    #     if self.initial_pressure is None:
+    #         self.initial_pressure = pressure_active.copy()
+    #         self.max_pressure_threshold = self.initial_pressure + 0.5 #0.5 bar threshold
+    #
+    #     # --- Exceedance ---
+    #     exceed_mask = pressure_active > self.max_pressure_threshold
+    #     exceed_count = int(np.sum(exceed_mask))
+    #     self.my_tracked_pressures.setdefault("PRESSURE_EXCEED_COUNT", []).append(exceed_count)
+    #
+    #     # Debug: print exceeding cell indices (I, J, K)
+    #     gidx_exceed = active_l2g[exceed_mask]
+    #     if exceed_count > 0:
+    #         print(f"[Exceedance] {exceed_count} cells exceed threshold")
+    #         for g in gidx_exceed:
+    #             k = g // (nx * ny)
+    #             j = (g % (nx * ny)) // nx
+    #             i = g % nx
+    #             print(f"  - I={i + 1}, J={j + 1}, K={k + 1}")  # 1-based indexing
+    #
+    #     # --- Pressure plume area (km²) and unique (I,J) count ---
+    #     ij_exceed = {(g % nx, (g // nx) % ny) for g in gidx_exceed}
+    #     unique_ij_count = len(ij_exceed)
+    #     dx = 25
+    #     area_km2 = unique_ij_count * dx * dx / 1e6
+    #     self.my_tracked_pressures.setdefault("PRESSURE_PLUME_AREA_KM2", []).append(area_km2)
+    #     self.my_tracked_pressures.setdefault("PRESSURE_EXCEED_SURFACE_CELLS", []).append(unique_ij_count)
+    #     print(f"[Exceedance] Unique (I, J) surface cells exceeding threshold: {unique_ij_count}")
+    #
+    #     # --- Fault ΔP analysis ---
+    #     from collections import defaultdict
+    #     fault_deltas = defaultdict(list)
+    #     for (i1, j1, k1), (i2, j2, k2) in self.reservoir.fault_connections_ijk:
+    #         idx1 = i1 + nx * j1 + nx * ny * k1
+    #         idx2 = i2 + nx * j2 + nx * ny * k2
+    #         idx1_local = self.reservoir.discr_mesh.global_to_local[idx1]
+    #         idx2_local = self.reservoir.discr_mesh.global_to_local[idx2]
+    #
+    #         delta = abs(pressure[idx1_local] - pressure[idx2_local])
+    #         fault_name = self.reservoir.fault_connection_to_name.get(((i1, j1, k1), (i2, j2, k2)), "UNNAMED")
+    #         fault_deltas[fault_name].append(delta)
+    #
+    #     all_deltas = [dp for deltas in fault_deltas.values() for dp in deltas]
+    #     self.my_tracked_pressures.setdefault("DP_FAULT_MEAN", []).append(np.mean(all_deltas) if all_deltas else 0.0)
+    #     self.my_tracked_pressures.setdefault("DP_FAULT_MAX", []).append(np.max(all_deltas) if all_deltas else 0.0)
+    #
+    #     for fault_name, deltas in fault_deltas.items():
+    #         self.my_tracked_pressures.setdefault(f"DP_FAULT_{fault_name}", []).append(
+    #             np.mean(deltas) if deltas else 0.0)
+    #         self.my_tracked_pressures.setdefault(f"DP_FAULT_{fault_name}_MAX", []).append(
+    #             np.max(deltas) if deltas else 0.0)
+    #
+    #     # --- Tracked cell logging ---
+    #     for (i, j, k, local_idx) in self.tracked_cells:
+    #         key_p = f'P_I{i}_J{j}_K{k}'
+    #         key_t = f'T_I{i}_J{j}_K{k}'
+    #         state_idx = local_idx * self.physics.n_vars
+    #         try:
+    #             p = self.physics.engine.X[state_idx]
+    #             T = self.physics.engine.X[state_idx + 2]
+    #             self.my_tracked_pressures.setdefault(key_p, []).append(p)
+    #             self.my_tracked_pressures.setdefault(key_t, []).append(T)
+    #         except Exception as e:
+    #             print(f"[Tracker Error] {key_p}/{key_t}: {e}")
+    #
+    #     self.print_well_rate()
 
     def output_properties(self, output_properties, timestep):
         # overload to add additional arrays (geomechanical proxy results) to vtk output

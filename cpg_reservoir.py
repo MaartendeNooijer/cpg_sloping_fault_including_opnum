@@ -731,48 +731,6 @@ class CPG_Reservoir(ReservoirBase):
 
         print(f"[FaultMult] Done. Applied: {applied}, Skipped: {skipped}")
 
-    #
-    # def apply_fault_mult(self, faultfile, cell_m, cell_p, mpfa_tran, ids):
-    #     # Faults
-    #
-    #     keep_reading = True
-    #     prev_fault_name = ''
-    #
-    #     with open(faultfile) as f:
-    #         while True:
-    #             buff = f.readline()
-    #             strline = buff.split()
-    #             if len(strline) == 0 or '/' == strline[0]:
-    #                 break
-    #             fault_name = strline[0]
-    #             # multiply tran
-    #             i1 = int(strline[1])
-    #             j1 = int(strline[2])
-    #             k1 = int(strline[3])
-    #             i2 = int(strline[4])
-    #             j2 = int(strline[5])
-    #             k2 = int(strline[6]) #was k2 = int(strline[6])
-    #             fault_tran_mult = float(strline[7])
-    #
-    #             if i1 > self.discr_mesh.nx or j1 > self.discr_mesh.ny or k1 > self.discr_mesh.nz:
-    #                 print('Error:', i1, j1, k1, 'out of grid', buff)
-    #                 continue  # skip
-    #             if i2 > self.discr_mesh.nx or j2 > self.discr_mesh.ny or k2 > self.discr_mesh.nz:
-    #                 print('Error:', i2, j2, k2, 'out of grid', buff)
-    #                 continue  # skip
-    #
-    #             m_idx = self.discr_mesh.global_to_local[self.discr_mesh.get_global_index(i1 - 1, j1 - 1, k1 - 1)]
-    #             p_idx = self.discr_mesh.global_to_local[self.discr_mesh.get_global_index(i2 - 1, j2 - 1, k2 - 1)]
-    #
-    #             p = set(np.where(cell_p == p_idx)[0])  # find cell idx in cell_p
-    #             m = set(np.where(cell_m == m_idx)[0])
-    #             res = m & p  # find connection (cell should be in both
-    #             if len(res) > 0:
-    #                 idx = res.pop()
-    #                 mpfa_tran[2 * ids[idx]] *= fault_tran_mult
-    #
-    #             print('fault tran mult', fault_tran_mult)
-
     def apply_volume_depth(self):
         self.depth = np.array(self.mesh.depth, copy=False)
         self.volume = np.array(self.mesh.volume, copy=False)
